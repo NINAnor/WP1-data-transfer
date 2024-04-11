@@ -44,6 +44,12 @@ gcloud config set project tambon-413414
 pip install -r requirements.txt
 ```
 
+### Create a `.env` file
+
+Document all the paths in an .env file.
+
+Use the [template](https://github.com/NINAnor/WP1-data-transfer/blob/main/.env)
+
 ### Download the data
 
 ```
