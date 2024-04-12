@@ -1,70 +1,66 @@
-import subprocess
 import os
-import json
 from google.cloud import storage
-from google.oauth2 import service_account
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Function to fetch service account credentials from a GCS bucket
-def fetch_service_account_key(bucket_name, blob_name):
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(blob_name)
-    key_file_content = blob.download_as_text()
-    key_file_dict = json.loads(key_file_content)
-    return key_file_dict
+def init_storage_client():
+    """
+    Initializes and returns a Google Cloud Storage client using the credentials
+    and project ID specified via environment variables.
+    """
+    service_account_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+    project_id = os.getenv('PROJECT_ID')
+    return storage.Client.from_service_account_json(service_account_path, project=project_id)
 
-# Function to initialize GCS client with service account credentials
-def init_storage_client(service_account_info):
-    credentials = service_account.Credentials.from_service_account_info(service_account_info)
-    storage_client = storage.Client(credentials=credentials)
-    return storage_client
+def transfer_and_delete_data(storage_client, bucket_name, source_folder, destination_path):
+    """
+    Downloads the specified source folder (prefix) and all its contents from the
+    bucket to the local destination, maintaining the original directory structure.
+    It supports nested directories and replicates the full hierarchy locally.
 
-# Function to list and transfer files, then optionally delete them
-def transfer_and_delete_data(bucket_name, source_folder, destination_server_path, service_account_info):
-    # Initialize the GCS client with credentials
-    storage_client = init_storage_client(service_account_info)
+    Args:
+    - storage_client: The initialized Google Cloud Storage client.
+    - bucket_name: The name of the source GCS bucket.
+    - source_folder: The source folder (prefix) in the bucket to download.
+                     Make sure it ends with '/' to include the folder itself.
+    - destination_path: The local destination path where files and directories will be created.
+    """
     bucket = storage_client.bucket(bucket_name)
-    
     blobs = bucket.list_blobs(prefix=source_folder)
+
     for blob in blobs:
-        # Skip newly uploaded files
-        #if current_time - blob.time_created < processing_delay:
-        #    continue
 
-        # Create local directory structure mirroring that of the GCS bucket
-        local_dir = os.path.join(destination_server_path, os.path.dirname(blob.name))
-        if not os.path.exists(local_dir):
-            os.makedirs(local_dir)
+        # Skip any directories (any path that ends with '/')
+        if blob.name.endswith('/'):
+            continue
 
-        # Modify the gsutil command to copy the entire directory structure
-        gsutil_cp_command = f'gsutil -m cp -r gs://{bucket_name}/{blob.name} {local_dir}/'
+        # Construct the full local path for the blob's file including directories
+        local_file_path = os.sep.join([destination_path, blob.name[len(source_folder):]])
+
+        # Create local directories as needed
+        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+
+        # Download the blob to the local file
+        blob.download_to_filename(local_file_path)
+        print(f"Downloaded {blob.name} to {local_file_path}")
+
+        # Optionally, delete the blob after a successful download
+        # blob.delete()
+        # print(f"Deleted {blob.name} from GCS.")
+
+    print("Data transfer completed.")
 
 
-        # Execute the command
-        subprocess.run(gsutil_cp_command, shell=True, check=True)
-
-        # After a successful transfer, delete the blob
-        # Comment out the following line if you want to manually verify before deletion
-        #blob.delete()
-
-    print("Data transfer and optional deletion completed.")
-
-# Main execution starts here
 if __name__ == "__main__":
-    # Fetch service account key file from environment variables
-    service_account_info = fetch_service_account_key(
-        os.getenv('SERVICE_ACCOUNT_KEY_BUCKET'), 
-        os.getenv('SERVICE_ACCOUNT_KEY_BLOB_NAME')
-    )
+    # Initialize the Google Cloud Storage client
+    gcs_client = init_storage_client()
 
-    # Perform the file transfer and deletion
-    transfer_and_delete_data(
-        os.getenv('SOURCE_BUCKET_NAME'), 
-        os.getenv('SOURCE_FOLDER_PREFIX'), 
-        os.getenv('DESTINATION_PATH'), 
-        service_account_info
-    )
+    # Environment variables for configuration
+    bucket_name = os.getenv('SOURCE_BUCKET_NAME')
+    source_folder = os.getenv('SOURCE_FOLDER_PREFIX')
+    destination_path = os.getenv('DESTINATION_PATH')
+
+    # Perform the file transfer and optional deletion
+    transfer_and_delete_data(gcs_client, bucket_name, source_folder, destination_path)
