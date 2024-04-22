@@ -20,23 +20,10 @@ Then create a **Key** that will act as the `GOOGLE_APPLICATION_CREDENTIALS`, an 
 
 Copy/Paste the `.json` file created from the key and copy it in a file called `key-file.json` that is to be stored both on your `local directory`.
 
-### Login the Google Cloud account
-
-1- Login to your Google Cloud account:
-
-Use the key file that has been copied onto your local repository:
-
-```bash
-gcloud auth login --cred-file ./key-file.json
-```
-
-2- Log in to the project
-
-```bash
-gcloud config set project tambon-413414
-```
 
 ## Run the program locally
+
+There is no need to use any login (`gcloud auth login`, `gcloud config set project`) as everything is handled by the script.
 
 ### Installing the dependancies
 
@@ -55,4 +42,8 @@ Use the [template](https://github.com/NINAnor/WP1-data-transfer/blob/main/.env)
 ```
 python3 main.py
 ```
+
+## Acknowledgement
+
+This program has been conceived by [Benjamin Cretois](https://bencretois.github.io/) as part of the [TABMON](https://www.nina.no/english/TABMON) project.
 

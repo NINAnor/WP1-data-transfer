@@ -47,8 +47,8 @@ def transfer_and_delete_data(storage_client, bucket_name, source_folder, destina
         print(f"Downloaded {blob.name} to {local_file_path}")
 
         # Optionally, delete the blob after a successful download
-        # blob.delete()
-        # print(f"Deleted {blob.name} from GCS.")
+        blob.delete()
+        print(f"Deleted {blob.name} from GCS.")
 
     print("Data transfer completed.")
 
