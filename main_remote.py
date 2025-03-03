@@ -119,17 +119,34 @@ def transfer_single_blob(blob, remote_host, remote_user, remote_path, password):
         ssh.close()
 
 
-def transfer_and_delete_data_parallel(storage_client, bucket_name, source_folder, remote_host, remote_user, remote_path, password, max_workers=4):
-    """
-    Uses parallel processing to transfer files to a remote server.
-    """
-    bucket = storage_client.bucket(bucket_name)
-    blobs = bucket.list_blobs(prefix=source_folder)
+if __name__ == "__main__":
+    # Initialize the Google Cloud Storage client
+    gcs_client = init_storage_client()
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Environment variables for configuration
+    bucket_name = os.getenv('SOURCE_BUCKET_NAME')
+    source_folder_env = os.getenv('SOURCE_FOLDER_PREFIX', '')
+    # Split the environment variable into a list of folder prefixes
+    source_folders = [folder.strip() for folder in source_folder_env.split(',') if folder.strip()]
+
+    remote_host = os.getenv('REMOTE_HOST')
+    remote_user = os.getenv('REMOTE_USER')
+    remote_path = os.getenv('REMOTE_PATH')
+    password = os.getenv('REMOTE_PASSWORD')
+
+    # Combine blobs from all specified prefixes
+    bucket = gcs_client.bucket(bucket_name)
+    all_blobs = []
+    for prefix in source_folders:
+        logging.info(f"Listing blobs with prefix: {prefix}")
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        all_blobs.extend(blobs)
+
+    # Use a single ThreadPoolExecutor to process all blobs concurrently
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = [
             executor.submit(transfer_single_blob, blob, remote_host, remote_user, remote_path, password)
-            for blob in blobs if not blob.name.endswith('/')  # Skip directories
+            for blob in all_blobs if not blob.name.endswith('/')  # Skip directories
         ]
 
         for future in as_completed(futures):
@@ -139,24 +156,3 @@ def transfer_and_delete_data_parallel(storage_client, bucket_name, source_folder
                 logging.error(f"Error in parallel task: {e}")
 
     logging.info("Data transfer to remote server completed in parallel.")
-
-
-if __name__ == "__main__":
-    # Initialize the Google Cloud Storage client
-    gcs_client = init_storage_client()
-
-    # Environment variables for configuration
-    bucket_name = os.getenv('SOURCE_BUCKET_NAME')
-    source_folder = os.getenv('SOURCE_FOLDER_PREFIX')
-    remote_host = os.getenv('REMOTE_HOST')
-    remote_user = os.getenv('REMOTE_USER')
-    remote_path = os.getenv('REMOTE_PATH')
-    password = os.getenv('REMOTE_PASSWORD')
-
-    # Perform parallel file transfer
-    logging.info("Starting parallel data transfer...")
-    transfer_and_delete_data_parallel(
-        gcs_client, bucket_name, source_folder,
-        remote_host, remote_user, remote_path, password,
-        max_workers=18
-    )

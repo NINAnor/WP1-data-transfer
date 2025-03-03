@@ -28,7 +28,9 @@ There is no need to use any login (`gcloud auth login`, `gcloud config set proje
 ### Installing the dependancies
 
 ```
+python -m venv .venv
 pip install -r requirements.txt
+.venv/bin/activate
 ```
 
 ### Create a `.env` file
@@ -40,7 +42,7 @@ Use the [template](https://github.com/NINAnor/WP1-data-transfer/blob/main/.env)
 ### Download the data
 
 ```
-python3 main.py
+python main_remote.py
 ```
 
 ## Acknowledgement
