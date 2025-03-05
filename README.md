@@ -21,31 +21,30 @@ Then create a **Key** that will act as the `GOOGLE_APPLICATION_CREDENTIALS`, an 
 Copy/Paste the `.json` file created from the key and copy it in a file called `key-file.json` that is to be stored both on your `local directory`.
 
 
-## Run the program locally
+## Setup rclone
 
-There is no need to use any login (`gcloud auth login`, `gcloud config set project`) as everything is handled by the script.
+### Setup the remote connections
 
-### Installing the dependancies
-
-```
-python -m venv .venv
-pip install -r requirements.txt
-.venv/bin/activate
-```
-
-### Create a `.env` file
-
-Document all the paths in an .env file.
-
-Use the [template](https://github.com/NINAnor/WP1-data-transfer/blob/main/.env)
-
-### Download the data
+Run
 
 ```
-python main_remote.py
+rclone config  
 ```
 
-## Acknowledgement
+and follow the prompts to create two remotes:
+
+- Google Cloud Storage Remote
+Create a new remote (e.g., name it gcs) and select Google Cloud Storage as the type. You will be asked for your project number and the path to your service account JSON file (the `key-file.json` created earlier).
+
+- Remote Server via SFTP
+Create another remote (e.g., name it remote) and select SFTP as the type. Provide your remote host, username, password (or key), and port.
 
 This program has been conceived by [Benjamin Cretois](https://bencretois.github.io/) as part of the [TABMON](https://www.nina.no/english/TABMON) project.
 
+### Start the transfer
+
+Run
+
+```
+./move.sh
+```
