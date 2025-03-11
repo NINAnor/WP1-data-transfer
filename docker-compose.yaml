@@ -1,0 +1,23 @@
+version: "3.8"
+services:
+  data-transfer:
+    build:
+    context: .
+    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+        delay: 60s
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcs_key
+      - RCLONE_CONFIG=/root/.config/rclone/rclone.conf #/run/secrets/rclone.conf
+    secrets:
+      - rclone_config
+      - gcs_key
+
+secrets:
+  rclone_config:
+    external: true
+  gcs_key:
+    external: true
