@@ -1,0 +1,32 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.35.1 # or higher tag
+    hooks:
+      - id: yamllint
+        args: [--format, parsable]
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.16.0
+    hooks:
+      - id: yamlfmt
+  - repo: https://github.com/iamthefij/docker-pre-commit
+    rev: v3.0.1
+    hooks:
+      - id: docker-compose-check
+  - repo: https://github.com/k-ogawa-1988/yamale-pre-commit
+    rev: v0.0.2
+    hooks:
+      - id: yamale-validate
+        files: '.*/metadata.ya?ml$'
+        verbose: true
+        exclude: 'schemas/.*.ya?ml$'
+        args:
+          - '-s'
+          - '../schemas/metadata.yml'

@@ -1,4 +1,4 @@
-# TABMON data transfer 
+# TABMON data transfer
 
 [TABMON](https://www.nina.no/english/TABMON) uses [BUGGs acoustic devices](https://www.bugg.xyz/) which by default send the data over to Google Cloud.
 
@@ -28,7 +28,7 @@ Copy/Paste the `.json` file created from the key and copy it in a file called `k
 Run
 
 ```
-rclone config  
+rclone config
 ```
 
 and follow the prompts to create two remotes:
@@ -39,7 +39,6 @@ Create a new remote (e.g., name it gcs) and select Google Cloud Storage as the t
 - Remote Server via SFTP
 Create another remote (e.g., name it remote) and select SFTP as the type. Provide your remote host, username, password (or key), and port.
 
-This program has been conceived by [Benjamin Cretois](https://bencretois.github.io/) as part of the [TABMON](https://www.nina.no/english/TABMON) project.
 
 ### Start the transfer
 
@@ -48,3 +47,7 @@ Run
 ```
 ./move.sh
 ```
+
+## Acknowledgments
+
+This program has been conceived by [Benjamin Cretois](https://bencretois.github.io/) as part of the [TABMON](https://www.nina.no/english/TABMON) project.

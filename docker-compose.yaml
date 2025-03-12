@@ -1,8 +1,7 @@
 version: "3.8"
 services:
   data-transfer:
-    build:
-    context: .
+    image: ghcr.io/ninanor/WP1-data-transfer/ghcr.io/ninanor/tabmon-data-transfer
     restart: unless-stopped
     deploy:
       restart_policy:
@@ -16,7 +15,7 @@ services:
       - source: tabmon_rclone.conf
         target: rclone.conf
       - source: gcs_key.json
-
+        # No need for target // default to source if target not specified
 secrets:
   tabmon_rclone.conf:
     external: true
