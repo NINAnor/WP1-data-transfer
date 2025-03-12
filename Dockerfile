@@ -3,8 +3,8 @@ FROM alpine:3.15
 RUN apk add --no-cache bash rclone duckdb
 
 WORKDIR /app
-COPY move.sh update_parquet.sh ./
-RUN chmod +x move.sh update_parquet.sh
+COPY move.sh make_parquet.sh ./
+RUN chmod +x move.sh make_parquet.sh
 
 RUN echo "0 0 * * * /app/move.sh && /app/make_parquet.sh >> /var/log/cron.log 2>&1" > /etc/crontabs/root
 
