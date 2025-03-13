@@ -1,7 +1,7 @@
 version: "3.8"
 services:
   data-transfer:
-    image: ghcr.io/ninanor/WP1-data-transfer/ghcr.io/ninanor/tabmon-data-transfer
+    image: ghcr.io/ninanor/WP1-data-transfer/tabmon-data-transfer
     restart: unless-stopped
     deploy:
       restart_policy:
@@ -9,15 +9,13 @@ services:
         max_attempts: 3
         delay: 60s
     environment:
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcs_key.json
-      RCLONE_CONFIG: /run/secrets/rclone.conf
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcs_key
+      RCLONE_CONFIG: /run/secrets/tabmon_rclone
     secrets:
-      - source: tabmon_rclone.conf
-        target: rclone.conf
-      - source: gcs_key.json
-        # No need for target // default to source if target not specified
+      - tabmon_rclone
+      - gcs_key
 secrets:
-  tabmon_rclone.conf:
+  tabmon_rclone:
     external: true
-  gcs_key.json:
+  gcs_key:
     external: true
