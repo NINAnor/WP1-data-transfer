@@ -5,6 +5,6 @@ RUN curl https://install.duckdb.org | sh
 
 WORKDIR /app
 COPY move.sh make_parquet.sh ./
-COPY --chmod=0644 duckdbcron /etc/cron.d/duckdbcron
+COPY --chmod=0644 duckdbcron /etc/crontabs/root
 
 CMD ["crond", "-f"]

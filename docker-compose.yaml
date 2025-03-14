@@ -1,7 +1,9 @@
 version: "3.8"
 services:
   data-transfer:
-    image: ghcr.io/ninanor/tabmon-data-transfer
+    #image: ghcr.io/ninanor/tabmon-data-transfer
+    build:
+      context: .
     restart: unless-stopped
     deploy:
       restart_policy:
@@ -14,8 +16,10 @@ services:
     secrets:
       - tabmon_rclone
       - gcs_key
+    volumes:
+      - /home/benjamin.cretois/Code/TABMON/data_transfer/:/home/benjamin.cretois/Code/TABMON/data_transfer/
 secrets:
   tabmon_rclone:
-    external: true
+    file: /home/benjamin.cretois/.config/rclone/rclone.conf # external: true
   gcs_key:
-    external: true
+    file: /home/benjamin.cretois/Code/TABMON/data_transfer/key-file.json # external: true

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 REMOTE="nirds3:bencretois-ns8129k-proj-tabmon/"
