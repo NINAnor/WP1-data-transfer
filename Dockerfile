@@ -16,7 +16,3 @@ COPY move.sh make_parquet.sh ./
 COPY --chmod=0600 duckdbcron /var/spool/cron/crontabs/root
 
 CMD ["cron", "-f", "-l", "-L", "8"]
-
-
-
-
