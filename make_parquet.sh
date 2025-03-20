@@ -5,7 +5,7 @@ REMOTE="nirds3:bencretois-ns8129k-proj-tabmon/"
 DEST="$REMOTE/index.parquet"
 
 # first list the files of the remove aas index.json
-rclone lsjson $REMOTE --recursive > index.json
+rclone lsjson $REMOTE --recursive --fast-list > index.json
 
 # the create the parquet file and send it to the S3 bucket
 duckdb -c "COPY (
