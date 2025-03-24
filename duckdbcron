@@ -1,5 +1,4 @@
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 RCLONE_CONFIG=/run/secrets/tabmon_rclone
 GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcs_key
 
-* * * * * ( /app/move.sh && /app/make_parquet.sh ) > /tmp/log.log 2>&1
+0 0 * * * ( /app/move.sh && /app/make_parquet.sh ) > /tmp/log.log 2>&1

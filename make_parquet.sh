@@ -8,7 +8,7 @@ DEST="$REMOTE/index.parquet"
 rclone lsjson $REMOTE --recursive --fast-list > index.json
 
 # the create the parquet file and send it to the S3 bucket
-duckdb -c "COPY (
+/usr/local/bin/duckdb -c "COPY (
   SELECT
     Path,
     Name,
