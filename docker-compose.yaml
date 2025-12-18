@@ -1,7 +1,6 @@
 version: "3.8"
 services:
   data-transfer:
-    #image: ghcr.io/ninanor/tabmon-data-transfer
     build:
       context: .
     restart: unless-stopped

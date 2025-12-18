@@ -12,7 +12,14 @@ RUN wget -q https://github.com/duckdb/duckdb/releases/download/v1.2.1/duckdb_cli
     chmod +x /usr/local/bin/duckdb
 
 WORKDIR /app
-COPY move.sh make_parquet.sh ./
-COPY --chmod=0600 duckdbcron /var/spool/cron/crontabs/root
+COPY move.sh make_parquet.sh cron-wrapper.sh ./
 
-CMD ["cron", "-f", "-l", "-L", "8"]
+# Copy and set up cron job
+COPY duckdbcron /etc/cron.d/duckdbcron
+RUN chmod 0644 /etc/cron.d/duckdbcron
+
+# Setup the entrypoint
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+CMD ["docker-entrypoint.sh"]

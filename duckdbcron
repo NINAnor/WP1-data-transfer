@@ -1,4 +1,8 @@
+# Set the envi variables for the cron job
 RCLONE_CONFIG=/run/secrets/tabmon_rclone
 GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcs_key
 
-0 0 * * * ( /app/move.sh && /app/make_parquet.sh ) > /tmp/log.log 2>&1
+# Run the moving and preprocessing everyday at midnight
+1 0 * * * /app/cron-wrapper.sh # run the process at midnight and 1 minute every day
+
+# Add an line at the end of the cron file
