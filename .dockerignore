@@ -1,0 +1,12 @@
+.git
+.gitignore
+.venv
+venv
+logs
+tmp
+index.json
+key-file.json
+.env
+*.log
+__pycache__
+*.pyc

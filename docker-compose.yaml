@@ -12,11 +12,18 @@ services:
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcs_key
       RCLONE_CONFIG: /run/secrets/tabmon_rclone
+      PARQUET_FILE_URL: /app/index.parquet
+      USERNAME: ${USERNAME}
+      PASSWORD: ${PASSWORD}
+      BASE_DIR: ${BASE_DIR}
+      SITE_CSV_URL: ${SITE_CSV_URL}
     secrets:
       - tabmon_rclone
       - gcs_key
+    volumes:
+      - ./logs:/var/log
 secrets:
   tabmon_rclone:
-    file: /home/benjamin.cretois/.config/rclone/rclone.conf # external: true
+    file: /home/benjamin.cretois/.config/rclone/rclone.conf
   gcs_key:
-    file: /home/benjamin.cretois/Code/TABMON/data_transfer/key-file.json # external: true
+    file: /home/benjamin.cretois/Code/TABMON/data_transfer/key-file.json

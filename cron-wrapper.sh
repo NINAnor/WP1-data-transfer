@@ -1,12 +1,39 @@
 #!/bin/bash
+set -uo pipefail
 
-# Log start time
-echo "$(date): Starting preprocessing cron job..." >> /var/log/move.log
+LOG="/var/log/pipeline.log"
 
-echo "$(date): Running move from Google Cloud to NIRD S3 storage..." >> /var/log/move.log
-/app/move.sh >> /var/log/move.log 2>&1
+log() {
+  echo "$(date): $*" >> "$LOG"
+}
 
-echo "$(date): Running indexing of the data..." >> /var/log/indexing.log
-/app/make_parquet.sh >> /var/log/indexing.log 2>&1
+run_step() {
+  local name="$1"
+  shift
+  log "Starting ${name}..."
+  if ! "$@" >> "$LOG" 2>&1; then
+    local rc=$?
+    log "❌ ${name} FAILED (exit ${rc})"
+    exit "$rc"
+  fi
+  log "✅ ${name} completed"
+}
 
+log "Starting pipeline..."
 
+# Load environment variables created at container startup
+if [ -f /app/.env-cron ]; then
+  source /app/.env-cron
+else
+  log "❌ .env-cron file not found!"
+  exit 1
+fi
+
+cd /app
+
+run_step "data transfer (GCS -> NIRD)" /app/move.sh
+run_step "index build" /app/make_parquet.sh
+run_step "preprocessing" /usr/local/bin/uv run python preprocess_all.py
+run_step "S3 upload" /app/copy_files_to_s3.sh
+
+log "🎉 Full pipeline completed successfully"

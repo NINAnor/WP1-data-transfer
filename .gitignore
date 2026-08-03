@@ -177,3 +177,6 @@ pyrightconfig.json
 rclone_transfer.log
 key-file.json
 default.nix
+tmp/
+index.json
+logs/
