@@ -70,7 +70,9 @@ def merge_status_site_info(df_status, site_csv_path, username=None, password=Non
     # Load site information first
     site_info = load_site_info(site_csv_path, username=username, password=password)
 
-    site_info = site_info[site_info["Active"]].copy()
+    # "Active" may contain NA/NaN (e.g. blank cells in the source CSV); treat
+    # those as inactive rather than raising a boolean-mask error.
+    site_info = site_info[site_info["Active"].fillna(False).astype(bool)].copy()
 
     # Create mapping between device IDs - use consistent 8-character suffix
     site_info["short_device"] = site_info["DeviceID"].str.strip().str[-8:]
@@ -115,7 +117,7 @@ def merge_status_site_info(df_status, site_csv_path, username=None, password=Non
         merged["last_file"].apply(calculate_days_since).round(1)
     )
 
-    merged.to_csv("./device_status.csv", index=False)
+    merged.to_csv("../output/device_status.csv", index=False)
 
 def main_status(parquet_file, 
                 site_csv_path, 

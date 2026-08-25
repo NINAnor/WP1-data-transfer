@@ -23,4 +23,4 @@ def preprocess_sites(parquet_file, username=None, password=None, base_dir = None
 
     result["url"] = base_dir + "/" + result["Path"]
 
-    result.to_csv("./image_mapping.csv", index=False)
+    result.to_csv("../output/image_mapping.csv", index=False)

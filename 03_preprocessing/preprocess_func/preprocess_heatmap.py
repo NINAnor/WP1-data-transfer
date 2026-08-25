@@ -3,14 +3,6 @@ import duckdb
 
 from .download import resolve_source, cleanup
 
-# Country mapping
-COUNTRY_MAP = {
-    "proj_tabmon_NINA": "Norway",
-    "proj_tabmon_NINA_ES": "Spain",
-    "proj_tabmon_NINA_NL": "Netherlands",
-    "proj_tabmon_NINA_FR": "France",
-}
-
 def load_site_info(csv_file, delimiter=",", username=None, password=None):
     """Load site information from CSV file or URL."""
 
@@ -48,29 +40,19 @@ def preprocess_heatmap(parquet_file, site_csv_path, username, password):
     finally:
         cleanup(path, is_temp)
 
-    # Extract device ID from path
-    data["short_device_id"] = (
-        data["Path"]
-        .str.split("/")
-        .str[-3]
-        .str.split("-")
-        .str[-1]
-        .str[-8:]
-        .str.strip()
-    )
+    # Extract device ID: last 8 chars of the device column (bugg_RPiID-xxx-<id>)
+    data["short_device_id"] = data["device"].str[-8:].str.strip()
 
     # Load site info
     site_info = load_site_info(site_csv_path, username=username, password=password)
-    site_info = site_info[site_info["Active"]].copy()
-    site_info["clean_id"] = site_info["DeploymentID"].str.strip()
+    # "Active" may contain NA/NaN (e.g. blank cells in the source CSV); treat
+    # those as inactive rather than raising a boolean-mask error.
+    site_info = site_info[site_info["Active"].fillna(False).astype(bool)].copy()
+    site_info["clean_id"] = site_info["DeviceID"].str.strip().str[-8:]
     data["clean_id"] = data["short_device_id"].str.strip()
 
-    # Merge data
+    # Merge data — Country comes directly from site_info
     df_merged = pd.merge(data, site_info, on="clean_id", how="left")
-
-    # Map countries
-    for code, country_name in COUNTRY_MAP.items():
-        df_merged.loc[df_merged["country"] == code, "Country"] = country_name
 
     df_merged["time_period"] = (df_merged["datetime"].dt.to_period("D").astype(str))
 
@@ -83,4 +65,4 @@ def preprocess_heatmap(parquet_file, site_csv_path, username, password):
     ).fillna(0)
 
     sorted_matrix = matrix_data.sort_index()
-    sorted_matrix.to_csv("./recording_matrix.csv")
+    sorted_matrix.to_csv("../output/recording_matrix.csv")

@@ -180,3 +180,6 @@ default.nix
 tmp/
 index.json
 logs/
+index.parquet
+output/
+rclone.conf/

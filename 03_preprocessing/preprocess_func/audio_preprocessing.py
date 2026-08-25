@@ -33,7 +33,7 @@ def preprocess_all_device_stats(parquet_file, username=None, password=None):
     result['avg_file_size_mb'] = (result['total_size_bytes'] / result['total_recordings']) / (1024**2)
 
     # Save to CSV
-    result.to_csv("./all_device_stats.csv", index=False)
+    result.to_csv("../output/all_device_stats.csv", index=False)
 
 def preprocess_dataset_stats(parquet_file, username=None, password=None):
     """Get statistics for the entire audio dataset."""
@@ -51,4 +51,4 @@ def preprocess_dataset_stats(parquet_file, username=None, password=None):
     finally:
         cleanup(path, is_temp)
 
-    result.to_csv("./dataset_stats.csv", index=False)
+    result.to_csv("../output/dataset_stats.csv", index=False)
