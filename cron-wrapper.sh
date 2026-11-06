@@ -27,5 +27,6 @@ run_step "01 transfer (GCS → NIRD)"  /app/01_transfer/move.sh
 run_step "02 indexing"               /app/02_indexing/make_parquet.sh
 run_step "03 preprocessing"          bash -c 'cd /app/03_preprocessing && uv run --project /app python preprocess_all.py'
 run_step "04 upload (CSVs → NIRD)"  /app/04_upload/copy_to_nird.sh
+run_step "05 dashboard tables"       bash -c 'cd /app/05_dashboard && uv run --project /app python build_tables.py --source s3://bencretois-ns8129k-proj-tabmon --out s3://bencretois-ns8129k-proj-tabmon/data/preprocessed/dashboard --names birdnet_multilingual.csv'
 
 log "🎉 Pipeline completed successfully"

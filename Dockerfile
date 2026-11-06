@@ -18,11 +18,15 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-install-project --no-dev
 
+# Bundle DuckDB's extensions in the image so scheduled jobs don't fetch them.
+RUN uv run --project /app python -c "import duckdb; c=duckdb.connect(); c.execute('INSTALL httpfs'); c.execute('INSTALL icu')"
+
 # Copy pipeline steps
 COPY 01_transfer/   ./01_transfer/
 COPY 02_indexing/   ./02_indexing/
 COPY 03_preprocessing/ ./03_preprocessing/
 COPY 04_upload/     ./04_upload/
+COPY 05_dashboard/  ./05_dashboard/
 
 # Copy orchestration files
 COPY cron-wrapper.sh ./
@@ -33,6 +37,7 @@ RUN chmod +x \
     /app/02_indexing/make_parquet.sh \
     /app/02_indexing/reindex.sh \
     /app/04_upload/copy_to_nird.sh \
+    /app/05_dashboard/s3_env.sh \
     /app/cron-wrapper.sh \
     /usr/local/bin/docker-entrypoint.sh
 

@@ -6,5 +6,8 @@ REMOTE="nirds3:bencretois-ns8129k-proj-tabmon/data/preprocessed"
 OUTPUT_DIR="/app/output"
 
 echo "Uploading CSVs to NIRD..."
-rclone copy "$OUTPUT_DIR" "$REMOTE" --include "*.csv"
+rclone copy "$OUTPUT_DIR" "$REMOTE" \
+  --filter "- image_mapping.csv" \
+  --filter "+ *.csv" \
+  --filter "- **"
 echo "Done."

@@ -1,20 +1,35 @@
 #!/bin/bash
 set -e
 
+# Read the nirds3 S3 settings from rclone unless supplied as environment vars.
+source /app/05_dashboard/s3_env.sh
+
+# DuckDB scratch data can be large; keep it in the mounted output area.
+export DUCKDB_TEMP_DIR=/app/output/duckdb-tmp
+mkdir -p "$DUCKDB_TEMP_DIR"
+
 # Create log file if it doesn't exist
 touch /var/log/pipeline.log
 chmod 644 /var/log/pipeline.log
 
 # Write environment variables to a file that cron can source
-cat > /app/.env-cron << EOF
-export RCLONE_CONFIG="${RCLONE_CONFIG}"
-export GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS}"
-export PARQUET_FILE_URL="${PARQUET_FILE_URL}"
-export USERNAME="${USERNAME}"
-export PASSWORD="${PASSWORD}"
-export BASE_DIR="${BASE_DIR}"
-export SITE_CSV_URL="${SITE_CSV_URL}"
-EOF
+umask 077
+env_vars=(
+  RCLONE_CONFIG GOOGLE_APPLICATION_CREDENTIALS PARQUET_FILE_URL USERNAME
+  PASSWORD SITE_CSV_URL S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY S3_ENDPOINT
+  S3_BUCKET S3_REGION TABLES_PREFIX DUCKDB_TEMP_DIR
+)
+{
+  for name in "${env_vars[@]}"; do
+    if [[ -v $name ]]; then
+      value=${!name}
+    else
+      value=
+    fi
+    printf 'export %s=%q\n' "$name" "$value"
+  done
+} > /app/.env-cron
+chmod 600 /app/.env-cron
 
 # Apply the cron job from the cron.d file
 echo "Installing cron job..."
