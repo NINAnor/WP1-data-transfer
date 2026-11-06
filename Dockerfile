@@ -3,7 +3,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 # Install system dependencies
 RUN apt-get update \
     && apt-get -y --no-install-recommends install \
-    wget ca-certificates rclone cron ffmpeg \
+    wget ca-certificates rclone cron \
     && rm -rf /var/lib/apt/lists/*
 
 # Install DuckDB CLI (used by 02_indexing scripts)

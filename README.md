@@ -1,6 +1,6 @@
 # TABMON data pipeline
 
-[TABMON](https://www.nina.no/english/TABMON) uses [BUGGs acoustic devices](https://www.bugg.xyz/), which send recordings to Google Cloud. This repository runs the single daily pipeline that transfers and indexes those recordings, keeps the legacy CSVs used by the API, and prepares the dashboard's parquet tables and audio previews.
+[TABMON](https://www.nina.no/english/TABMON) uses [BUGGs acoustic devices](https://www.bugg.xyz/), which send recordings to Google Cloud. This repository runs the single daily pipeline that transfers and indexes those recordings, keeps the legacy CSVs used by the API, and prepares the dashboard's parquet tables.
 
 Everything runs inside one Docker container, scheduled at 06:00 UTC. Steps run in order and the pipeline stops if a step fails.
 
@@ -18,8 +18,7 @@ cron-wrapper.sh
     ├── 02_indexing/make_parquet.sh     incremental index build + validation + upload
     ├── 03_preprocessing/preprocess_all.py  legacy API CSVs
     ├── 04_upload/copy_to_nird.sh       uploads legacy CSVs
-    ├── 05_dashboard/build_tables.py    builds dashboard parquet tables
-    └── 06_dashboard/cut_clips.py       cuts and uploads dashboard audio previews
+    └── 05_dashboard/build_tables.py    builds dashboard parquet tables
 ```
 
 ## Pipeline steps
@@ -31,7 +30,6 @@ cron-wrapper.sh
 | 03 | `03_preprocessing/preprocess_all.py` | Produces the legacy CSVs still consumed by the dashboard API |
 | 04 | `04_upload/copy_to_nird.sh` | Uploads those CSVs to NIRD S3 |
 | 05 | `05_dashboard/build_tables.py` | Builds the dashboard's parquet data contract |
-| 06 | `05_dashboard/cut_clips.py` | Incrementally creates and uploads 5-second MP3 preview clips |
 
 Supporting files include `03_preprocessing/preprocess_func/` (legacy CSV logic), `05_dashboard/reference/` (species ecology reference data), `cron-wrapper.sh` (step orchestration), and `docker-entrypoint.sh` (cron environment setup).
 
@@ -48,8 +46,8 @@ Step 05 writes dashboard parquet tables under
 `s3://bencretois-ns8129k-proj-tabmon/data/preprocessed/dashboard/`, including
 `deployments.parquet`, `effort.parquet`, `phenology.parquet`, `species.parquet`,
 `clips.parquet`, `photos.parquet`, `validations.parquet`, `species_info.parquet`,
-and `species_ecology.parquet`. Step 06 adds MP3 files at
-`data/preprocessed/dashboard/clips/v3/{clip_id}.mp3`.
+and `species_ecology.parquet`. The dashboard API cuts requested audio clips on demand
+directly from source recordings in S3; this pipeline does not pre-generate MP3 files.
 
 These outputs are consumed by the separate
 [TABMON dashboard repository](https://github.com/NINAnor/tabmon_dashboard); see
@@ -87,7 +85,7 @@ Local credential/config files and generated data are ignored by Git and excluded
 docker compose up -d --build
 ```
 
-The dashboard tables job also calls Wikipedia/Wikidata, so the container needs outbound internet access. DuckDB's `httpfs` and `icu` extensions and the `ffmpeg` executable are included in the image.
+The dashboard tables job also calls Wikipedia/Wikidata, so the container needs outbound internet access. DuckDB's `httpfs` and `icu` extensions are included in the image.
 
 ## Manual runs / testing
 
