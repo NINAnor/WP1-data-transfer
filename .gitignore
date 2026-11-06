@@ -182,4 +182,5 @@ index.json
 logs/
 index.parquet
 output/
-rclone.conf/
+rclone.conf
+.env-cron

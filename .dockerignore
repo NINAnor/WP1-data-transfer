@@ -6,7 +6,11 @@ logs
 tmp
 index.json
 key-file.json
+rclone.conf
 .env
+.env-cron
+index.parquet
+output
 *.log
 __pycache__
 *.pyc

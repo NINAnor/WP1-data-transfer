@@ -15,7 +15,6 @@ services:
       PARQUET_FILE_URL: /app/index.parquet
       USERNAME: ${USERNAME}
       PASSWORD: ${PASSWORD}
-      BASE_DIR: ${BASE_DIR}
       SITE_CSV_URL: ${SITE_CSV_URL}
     secrets:
       - tabmon_rclone
