@@ -11,6 +11,7 @@ files that the API rolls up on request:
   clips.parquet        example detections that can be played back
   photos.parquet       deployment photos (team area only)
   validations.parquet  validation progress per country / species
+  validation_summary.parquet  clips listened to per country / source
 
 Usage:
   python build_tables.py --source s3://bencretois-ns8129k-proj-tabmon --out ./out
@@ -212,7 +213,11 @@ def build_effort(con, out: str):
 
 
 def build_validations(con, src: str, out: str):
-    """Collect (species, confidence, is_correct) pairs from citizen and expert sessions."""
+    """Collect (species, confidence, is_correct) pairs from citizen and expert sessions.
+
+    A reviewer can answer the same clip again (an edit); only their latest answer
+    counts. Different reviewers answering the same clip are all kept.
+    """
     log.info("validations")
     con.execute(
         f"""
@@ -220,9 +225,14 @@ def build_validations(con, src: str, out: str):
         SELECT species, TRY_CAST(confidence AS DOUBLE) AS confidence,
                country, filename, TRY_CAST(start_time AS INTEGER) AS start_s,
                CASE lower(validation_response) WHEN 'yes' THEN true
-                    WHEN 'no' THEN false END AS correct
+                    WHEN 'no' THEN false END AS correct,
+               annotator_name AS reviewer
         FROM read_csv('{src}/validations/*.csv', union_by_name = true,
                       all_varchar = true, header = true)
+        QUALIFY annotator_name IS NULL
+             OR row_number() OVER (
+                    PARTITION BY filename, start_time, species, annotator_name
+                    ORDER BY TRY_CAST("timestamp" AS TIMESTAMP) DESC NULLS LAST) = 1
         """
     )
     con.execute(
@@ -231,17 +241,23 @@ def build_validations(con, src: str, out: str):
         SELECT country, filename, TRY_CAST(start_time AS INTEGER) AS start_s,
                string_split(birdnet_species_detected, '|') AS sp,
                string_split(birdnet_confidences, '|') AS conf,
-               string_split(identified_species, '|') AS truth
+               string_split(identified_species, '|') AS truth,
+               userID AS reviewer
         FROM read_csv('{src}/validations_expert/*.csv', union_by_name = true,
                       all_varchar = true, header = true)
         WHERE birdnet_species_detected IS NOT NULL
+        QUALIFY userID IS NULL
+             OR row_number() OVER (
+                    PARTITION BY filename, start_time, userID
+                    ORDER BY TRY_CAST("timestamp" AS TIMESTAMP) DESC NULLS LAST) = 1
         """
     )
     con.execute(
         """
         CREATE OR REPLACE TABLE expert AS
         SELECT sp[i] AS species, TRY_CAST(conf[i] AS DOUBLE) AS confidence,
-               country, filename, start_s, list_contains(truth, sp[i]) AS correct
+               country, filename, start_s, list_contains(truth, sp[i]) AS correct,
+               reviewer
         FROM expert_raw, range(1, len(sp) + 1) t(i)
         """
     )
@@ -262,6 +278,16 @@ def build_validations(con, src: str, out: str):
                    count(*) FILTER (WHERE correct) AS n_correct
             FROM validated GROUP BY ALL
         ) TO '{out}/validations.parquet' (FORMAT parquet)
+        """
+    )
+    # One expert clip checks several BirdNET species at once, so the number of
+    # clips listened to is much lower than the number of species checks above.
+    con.execute(
+        f"""
+        COPY (
+            SELECT country, source, count(DISTINCT (filename, start_s)) AS n_clips
+            FROM validated GROUP BY ALL
+        ) TO '{out}/validation_summary.parquet' (FORMAT parquet)
         """
     )
 

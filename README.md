@@ -45,8 +45,8 @@ The legacy CSVs below are uploaded to `nirds3:bencretois-ns8129k-proj-tabmon/dat
 Step 05 writes dashboard parquet tables under
 `s3://bencretois-ns8129k-proj-tabmon/data/preprocessed/dashboard/`, including
 `deployments.parquet`, `effort.parquet`, `phenology.parquet`, `species.parquet`,
-`clips.parquet`, `photos.parquet`, `validations.parquet`, `species_info.parquet`,
-and `species_ecology.parquet`. The dashboard API cuts requested audio clips on demand
+`clips.parquet`, `photos.parquet`, `validations.parquet`, `validation_summary.parquet`,
+`species_info.parquet`, and `species_ecology.parquet`. The dashboard API cuts requested audio clips on demand
 directly from source recordings in S3; this pipeline does not pre-generate MP3 files.
 
 These outputs are consumed by the separate
