@@ -325,9 +325,25 @@ def build_thresholds(con, out: str):
     hist_by_species = {k: g for k, g in hist.groupby("species")}
 
     thresholds, curves, observed = [], [], []
-    validated = validated[validated["confidence"] >= MIN_SCORE]
-    for species, rows in validated.groupby("species"):
+    for species, all_rows in validated.groupby("species"):
+        if len(all_rows) < MIN_VALIDATIONS:
+            continue
+        rows = all_rows[all_rows["confidence"] >= MIN_SCORE]
         if len(rows) < MIN_VALIDATIONS:
+            # Checked often, but almost only at scores below any detection (mostly
+            # "not there"): too little evidence to show it at the default threshold.
+            thresholds.append(
+                {
+                    "species": species,
+                    "n_validated": len(rows),
+                    "threshold": None,
+                    "precision_at_threshold": None,
+                    "status": "unreliable",
+                    "method": "insufficient",
+                    "intercept": None,
+                    "slope": None,
+                }
+            )
             continue
         h = hist_by_species.get(species)
         result = calibrate_species(

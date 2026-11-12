@@ -30,7 +30,9 @@ threshold is not the precision of the real detections. Instead:
    within 2 points of the best precision, if that is at least 70%
    (`calibrated_low`); otherwise the species is `unreliable`.
 
-At least 10 checked clips must lie above the threshold. If the fit fails (no
+At least 10 checked clips must lie above the threshold. Checks scoring below 0.10
+are ignored (BirdNET reports no detections there); a species checked 20+ times
+but with fewer than 20 checks at 0.10 or more stays `unreliable`. If the fit fails (no
 increase of correctness with score), the plain share of correct checks is used.
 The curves are written to `calibration.parquet` for the dashboard's chart.
 
