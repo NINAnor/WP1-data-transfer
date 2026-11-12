@@ -12,7 +12,9 @@ detections, which are mostly low-scoring. Instead we:
    the smooth curve;
 3. weight the curve by the scores of *all* detections of the species to get the
    expected precision of everything kept above a threshold t;
-4. pick the lowest t whose expected precision reaches the target.
+4. pick the lowest t whose expected precision reaches the target; if it is never
+   reached, the lowest t within TOLERANCE of the best precision (if that is at
+   least the fallback level).
 
 When the fit is not usable (no increase of correctness with score, or no
 convergence), the plain share of correct validations above t is used instead.
@@ -30,6 +32,7 @@ GRID = np.round(np.arange(MIN_SCORE, 1.0, 0.01), 2)
 OBSERVED_BIN = 0.05
 EDGES = np.round(np.arange(0.10, 1.0 + 1e-9, OBSERVED_BIN), 2)
 SHRINKAGE = 20
+TOLERANCE = 0.02
 EPS = 1e-4
 
 
@@ -139,8 +142,10 @@ def choose_threshold(
         return float(grid[i]), float(precision[i]), "calibrated"
     loose = np.flatnonzero(ok & (precision >= fallback))
     if len(loose):
-        # Best precision; the lowest threshold among ties keeps the most detections.
-        i = loose[np.argmax(np.round(precision[loose], 6))]
+        # The lowest threshold within TOLERANCE of the best precision: raising the
+        # threshold further would discard detections for almost no gain.
+        best = precision[loose].max()
+        i = loose[np.argmax(precision[loose] >= best - TOLERANCE)]
         return float(grid[i]), float(precision[i]), "calibrated_low"
     return None, None, "unreliable"
 
