@@ -27,7 +27,7 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
-from calibration import calibrate_species
+from calibration import MIN_SCORE, calibrate_species
 from species_ecology import build_species_ecology
 from species_info import build_species_info
 
@@ -325,6 +325,7 @@ def build_thresholds(con, out: str):
     hist_by_species = {k: g for k, g in hist.groupby("species")}
 
     thresholds, curves, observed = [], [], []
+    validated = validated[validated["confidence"] >= MIN_SCORE]
     for species, rows in validated.groupby("species"):
         if len(rows) < MIN_VALIDATIONS:
             continue

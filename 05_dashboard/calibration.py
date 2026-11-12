@@ -16,6 +16,8 @@ detections, which are mostly low-scoring. Instead we:
 
 When the fit is not usable (no increase of correctness with score, or no
 convergence), the plain share of correct validations above t is used instead.
+Validations scoring below MIN_SCORE are ignored: BirdNET reports no detections
+there, so they say nothing about the detections being counted.
 """
 
 import itertools
@@ -23,7 +25,8 @@ import math
 
 import numpy as np
 
-GRID = np.round(np.arange(0.10, 1.0, 0.01), 2)
+MIN_SCORE = 0.10
+GRID = np.round(np.arange(MIN_SCORE, 1.0, 0.01), 2)
 OBSERVED_BIN = 0.05
 EDGES = np.round(np.arange(0.10, 1.0 + 1e-9, OBSERVED_BIN), 2)
 SHRINKAGE = 20
@@ -73,7 +76,7 @@ def fit_logistic(score, correct, ridge: float = 1e-2, iterations: int = 50):
 
 
 def bin_index(score):
-    """Index of the 0.05-wide score bin (scores below 0.10 join the first bin)."""
+    """Index of the 0.05-wide score bin (scores of 1.0 join the last bin)."""
     idx = np.floor((np.asarray(score, dtype=float) - EDGES[0]) / OBSERVED_BIN + 1e-9)
     return np.clip(idx.astype(int), 0, len(EDGES) - 2)
 
@@ -94,8 +97,10 @@ def bin_adjustment(score, correct, intercept, slope, shrinkage=SHRINKAGE):
 
 
 def adjusted_probability(score, intercept, slope, delta):
-    p = sigmoid(intercept + slope * logit(score)) + delta[bin_index(score)]
-    return np.clip(p, 0.0, 1.0)
+    """Logistic curve plus the bin shifts, interpolated between bin centres."""
+    centres = (EDGES[:-1] + EDGES[1:]) / 2
+    shift = np.interp(np.asarray(score, dtype=float), centres, delta)
+    return np.clip(sigmoid(intercept + slope * logit(score)) + shift, 0.0, 1.0)
 
 
 def expected_precision(p_correct, bin_centres, bin_counts, grid=GRID):
@@ -153,6 +158,8 @@ def calibrate_species(
     """Threshold, status, method and the curves needed to draw the calibration."""
     score = np.asarray(score, dtype=float)
     correct = np.asarray(correct, dtype=bool)
+    relevant = score >= MIN_SCORE
+    score, correct = score[relevant], correct[relevant]
     hist_scores = np.asarray(hist_scores, dtype=float)
     hist_counts = np.asarray(hist_counts, dtype=float)
     if hist_counts.sum() == 0:
