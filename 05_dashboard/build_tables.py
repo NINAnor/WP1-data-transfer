@@ -12,6 +12,8 @@ files that the API rolls up on request:
   photos.parquet       deployment photos (team area only)
   validations.parquet  validation progress per country / species
   validation_summary.parquet  clips listened to per country / source
+  calibration.parquet  per-species threshold calibration curves (for charts)
+  species_names.parquet  common names per species and language
 
 Usage:
   python build_tables.py --source s3://bencretois-ns8129k-proj-tabmon --out ./out
@@ -24,6 +26,8 @@ import os
 from pathlib import Path
 
 import duckdb
+import pandas as pd
+from calibration import calibrate_species
 from species_ecology import build_species_ecology
 from species_info import build_species_info
 
@@ -199,17 +203,17 @@ def build_effort(con, out: str):
     log.info("effort")
     con.execute(
         f"""
-        COPY (
-            SELECT r.site_id, r.ts_local::DATE AS date, hour(r.ts_local)::TINYINT AS hour,
-                   (count(*) * {FILE_MINUTES})::FLOAT AS recorded_minutes
-            FROM recordings r
-            SEMI JOIN analysed_days a
-              ON a.deployment_id = r.deployment_id AND a.day_utc = r.ts_utc::DATE
-            GROUP BY ALL
-            ORDER BY site_id, date, hour
-        ) TO '{out}/effort.parquet' (FORMAT parquet)
+        CREATE OR REPLACE TABLE effort AS
+        SELECT r.site_id, r.ts_local::DATE AS date, hour(r.ts_local)::TINYINT AS hour,
+               (count(*) * {FILE_MINUTES})::FLOAT AS recorded_minutes
+        FROM recordings r
+        SEMI JOIN analysed_days a
+          ON a.deployment_id = r.deployment_id AND a.day_utc = r.ts_utc::DATE
+        GROUP BY ALL
+        ORDER BY site_id, date, hour
         """
     )
+    con.execute(f"COPY effort TO '{out}/effort.parquet' (FORMAT parquet)")
 
 
 def build_validations(con, src: str, out: str):
@@ -292,45 +296,103 @@ def build_validations(con, src: str, out: str):
     )
 
 
-def build_thresholds(con):
-    """Per-species threshold calibrated on the citizen and expert validations."""
-    log.info("thresholds")
+def build_score_histogram(con, src: str):
+    """Scores of all BirdNET predictions per species, in 0.01-wide bins.
+
+    Calibration weights P(correct | score) by these to estimate the precision of
+    the detections that are actually kept above a threshold.
+    """
+    log.info("score histogram")
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE thresholds AS
-        WITH grid AS (SELECT unnest(range(10, 100, 5)) / 100.0 AS t),
-        per_t AS (
-            SELECT v.species, g.t,
-                   count(*) FILTER (WHERE v.confidence >= g.t) AS n_above,
-                   avg(v.correct::INT) FILTER (WHERE v.confidence >= g.t) AS precision
-            FROM validated v CROSS JOIN grid g
-            GROUP BY ALL
-        ),
-        totals AS (SELECT species, count(*) AS n FROM validated GROUP BY ALL),
-        strict AS (
-            SELECT species, min(t) AS t FROM per_t
-            WHERE precision >= {TARGET_PRECISION} AND n_above >= {MIN_ABOVE_THRESHOLD}
-            GROUP BY ALL
-        ),
-        fallback AS (
-            SELECT species, arg_max(t, precision - t / 1000) AS t FROM per_t
-            WHERE precision >= {FALLBACK_PRECISION} AND n_above >= {MIN_ABOVE_THRESHOLD}
-            GROUP BY ALL
-        ),
-        best AS (
-            SELECT species, COALESCE(s.t, f.t) AS t,
-                   CASE WHEN s.t IS NOT NULL THEN 'calibrated'
-                        WHEN f.t IS NOT NULL THEN 'calibrated_low' END AS status
-            FROM strict s FULL JOIN fallback f USING (species)
-        )
-        SELECT tot.species, tot.n AS n_validated, b.t AS threshold,
-               p.precision AS precision_at_threshold,
-               COALESCE(b.status, 'unreliable') AS status
-        FROM totals tot
-        LEFT JOIN best b USING (species)
-        LEFT JOIN per_t p ON p.species = b.species AND p.t = b.t
-        WHERE tot.n >= {MIN_VALIDATIONS}
+        CREATE OR REPLACE TABLE score_hist AS
+        SELECT "scientific name" AS species,
+               (least(floor(confidence * 100), 99) + 0.5) / 100 AS score,
+               count(*) AS n
+        FROM read_parquet('{src}/{PREDICTIONS_GLOB}',
+                          hive_partitioning = true, union_by_name = true)
+        WHERE confidence BETWEEN 0 AND 1
+        GROUP BY ALL
         """
+    )
+
+
+def build_thresholds(con, out: str):
+    """Per-species threshold calibrated on the citizen and expert validations."""
+    log.info("thresholds")
+    validated = con.execute("SELECT species, confidence, correct FROM validated").df()
+    hist = con.execute("SELECT species, score, n FROM score_hist").df()
+    hist_by_species = {k: g for k, g in hist.groupby("species")}
+
+    thresholds, curves, observed = [], [], []
+    for species, rows in validated.groupby("species"):
+        if len(rows) < MIN_VALIDATIONS:
+            continue
+        h = hist_by_species.get(species)
+        result = calibrate_species(
+            rows["confidence"].to_numpy(),
+            rows["correct"].to_numpy(),
+            [] if h is None else h["score"].to_numpy(),
+            [] if h is None else h["n"].to_numpy(),
+            target=TARGET_PRECISION,
+            fallback=FALLBACK_PRECISION,
+            min_above=MIN_ABOVE_THRESHOLD,
+        )
+        thresholds.append(
+            {
+                "species": species,
+                "n_validated": len(rows),
+                "threshold": result["threshold"],
+                "precision_at_threshold": result["precision_at_threshold"],
+                "status": result["status"],
+                "method": result["method"],
+                "intercept": result["intercept"],
+                "slope": result["slope"],
+            }
+        )
+        curves += [{"species": species, **row} for row in result["curve"]]
+        observed += [{"species": species, **row} for row in result["observed"]]
+
+    columns = {
+        "thresholds": (
+            "species VARCHAR, n_validated BIGINT, threshold DOUBLE, "
+            "precision_at_threshold DOUBLE, status VARCHAR, method VARCHAR, "
+            "intercept DOUBLE, slope DOUBLE"
+        ),
+        "calibration_curve": (
+            "species VARCHAR, confidence DOUBLE, p_correct DOUBLE, p_logistic DOUBLE, "
+            "precision_above DOUBLE, naive_precision_above DOUBLE, "
+            "n_validated_above BIGINT, n_detections_above BIGINT"
+        ),
+        "calibration_observed": (
+            "species VARCHAR, confidence DOUBLE, n_validated BIGINT, n_correct BIGINT"
+        ),
+    }
+    for table, rows in (
+        ("thresholds", thresholds),
+        ("calibration_curve", curves),
+        ("calibration_observed", observed),
+    ):
+        con.execute(f"CREATE OR REPLACE TABLE {table} ({columns[table]})")
+        if rows:
+            con.register("frame", pd.DataFrame(rows))
+            names = ", ".join(c.split()[0] for c in columns[table].split(", "))
+            con.execute(f"INSERT INTO {table} SELECT {names} FROM frame")
+            con.unregister("frame")
+    con.execute(
+        f"""
+        COPY (
+            SELECT 'curve' AS kind, * FROM calibration_curve
+            UNION ALL BY NAME
+            SELECT 'observed' AS kind, * FROM calibration_observed
+            ORDER BY species, kind, confidence
+        ) TO '{out}/calibration.parquet' (FORMAT parquet)
+        """
+    )
+    log.info(
+        "thresholds: %d species, %d calibrated",
+        len(thresholds),
+        sum(t["status"].startswith("calibrated") for t in thresholds),
     )
 
 
@@ -353,11 +415,19 @@ def build_detections(con, src: str, out: str):
     con.execute(
         f"""
         CREATE OR REPLACE TABLE detections_sited AS
-        SELECT x.*, d.site_id, d.cluster_id, d.country,
-               {local_ts("x.ts_utc", "d.country")} AS ts_local
-        FROM detections x
-        JOIN deployments d USING (deployment_id)
-        WHERE x.ts_utc >= TIMESTAMP '{DATA_START}'
+        WITH sited AS (
+            SELECT x.*, d.site_id, d.cluster_id, d.country,
+                   {local_ts("x.ts_utc", "d.country")} AS ts_local
+            FROM detections x
+            JOIN deployments d USING (deployment_id)
+            WHERE x.ts_utc >= TIMESTAMP '{DATA_START}'
+        )
+        -- Rates divide by recording effort, so a detection only counts in an hour
+        -- whose audio is in the bucket and was analysed (drops e.g. test runs).
+        SELECT s.* FROM sited s
+        SEMI JOIN effort e
+          ON e.site_id = s.site_id AND e.date = s.ts_local::DATE
+         AND e.hour = hour(s.ts_local)
         """
     )
     con.execute(
@@ -411,6 +481,43 @@ def build_species(con, names_csv: str | None, out: str):
             LEFT JOIN checked ck USING (species)
             ORDER BY n_detections DESC
         ) TO '{out}/species.parquet' (FORMAT parquet)
+        """
+    )
+
+
+def build_species_names(con, names_csv: str | None, out: str):
+    """Common names in every language of the names CSV, one row per species x language.
+
+    Each column other than Scientific_Name is a language, named by its ISO 639-1
+    code (en_uk is stored as en), so adding a language only needs a new column.
+    """
+    log.info("species names")
+    if not names_csv:
+        con.execute(
+            "CREATE OR REPLACE TABLE species_names "
+            "(species VARCHAR, lang VARCHAR, name VARCHAR)"
+        )
+    else:
+        con.execute(
+            f"""
+            CREATE OR REPLACE TABLE species_names AS
+            WITH wide AS (
+                FROM read_csv('{names_csv}', header = true, all_varchar = true)
+            ),
+            long AS (UNPIVOT wide ON COLUMNS(* EXCLUDE (Scientific_Name))
+                     INTO NAME lang VALUE name)
+            SELECT Scientific_Name AS species,
+                   CASE lower(lang) WHEN 'en_uk' THEN 'en' ELSE lower(lang) END AS lang,
+                   trim(name) AS name
+            FROM long
+            WHERE Scientific_Name IN (SELECT DISTINCT species FROM detections_sited)
+              AND trim(name) <> ''
+            """
+        )
+    con.execute(
+        f"""
+        COPY (SELECT * FROM species_names ORDER BY species, lang)
+        TO '{out}/species_names.parquet' (FORMAT parquet)
         """
     )
 
@@ -506,10 +613,12 @@ def main():
     build_effort(con, out)
     build_photos(con, src, out)
     build_validations(con, src, out)
-    build_thresholds(con)
+    build_score_histogram(con, src)
+    build_thresholds(con, out)
     if not args.skip_detections:
         build_detections(con, src, out)
         build_species(con, args.names, out)
+        build_species_names(con, args.names, out)
         build_clips(con, out)
         if not args.skip_species_info:
             build_species_info(con, out)
