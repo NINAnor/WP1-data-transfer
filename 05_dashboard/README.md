@@ -17,24 +17,24 @@ required reference datasets and multilingual species names are included here.
 ## Confidence thresholds
 
 `calibration.py` picks a BirdNET confidence threshold per species from the expert
-and citizen validations (species with at least 20 checks). Validated clips were
-sampled evenly across confidence bins, so the share of correct clips above a
-threshold is not the precision of the real detections. Instead:
+and citizen validations, following the BirdNET guidelines (Wood & Kahl 2024):
 
-1. fit P(correct | score) = sigmoid(a + b · logit(score)) on the validations;
-2. in each 0.05-wide score bin, pull that curve towards the observed share of
-   correct clips, weighted n / (n + 20);
-3. weight it by the scores of all BirdNET predictions of the species to get the
-   expected precision of everything kept above each threshold;
-4. take the lowest threshold reaching 90% (`calibrated`); otherwise the lowest one
-   within 2 points of the best precision, if that is at least 70%
-   (`calibrated_low`); otherwise the species is `unreliable`.
+1. model P(correct | score) = u · sigmoid(a + b · logit(score)) on the checks
+   scoring 0.10 or more (BirdNET reports no detections below). u = 1 is plain
+   logistic regression; a ceiling u < 1 is kept when it predicts held-out checks
+   better (5-fold cross-validation), for species that never get close to 100%
+   correct;
+2. the threshold is the lowest score where the curve reaches 90% (`calibrated`),
+   otherwise 70% (`calibrated_low`), otherwise the species is `unreliable`. At
+   least 10 checks must lie at or above the threshold;
+3. 200 bootstrap refits give a 95% band for the curve and a range for the
+   threshold.
 
-At least 10 checked clips must lie above the threshold. Checks scoring below 0.10
-are ignored (BirdNET reports no detections there); a species checked 20+ times
-but with fewer than 20 checks at 0.10 or more stays `unreliable`. If the fit fails (no
-increase of correctness with score), the plain share of correct checks is used.
-The curves are written to `calibration.parquet` for the dashboard's chart.
+Species need 20 checks scoring 0.10 or more; a species checked 20+ times but
+mostly below 0.10 stays `unreliable`. Validated clips were sampled evenly across
+confidence bins, which does not bias P(correct | score). Curves, observed
+accuracy per 0.05 bin (with Wilson 95% intervals) and the number of detections
+above each threshold are written to `calibration.parquet` for the dashboard.
 
 ## Species names
 

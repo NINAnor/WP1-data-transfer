@@ -1,153 +1,150 @@
 """Per-species confidence thresholds from validated BirdNET detections.
 
-Validated clips were sampled evenly across confidence bins, so the share of
-correct clips above a threshold over-weights high scores compared with real
-detections, which are mostly low-scoring. Instead we:
+Following the BirdNET guidelines (Wood & Kahl 2024), we model the probability
+that a detection is correct as a function of its confidence score and take the
+lowest score at which that probability reaches the target (90%):
 
-1. fit P(correct | score) = sigmoid(a + b * logit(score)) on the validations,
-   which does not depend on how many clips were checked at each score;
-2. in each 0.05-wide score bin, pull that curve towards the observed share of
-   correct clips, weighted n / (n + SHRINKAGE): well-validated bins follow the
-   data (e.g. accuracy levelling off below 1 at high scores), sparse bins keep
-   the smooth curve;
-3. weight the curve by the scores of *all* detections of the species to get the
-   expected precision of everything kept above a threshold t;
-4. pick the lowest t whose expected precision reaches the target; if it is never
-   reached, the lowest t within TOLERANCE of the best precision (if that is at
-   least the fallback level).
+    P(correct | score) = u * sigmoid(a + b * logit(score))
 
-When the fit is not usable (no increase of correctness with score, or no
-convergence), the plain share of correct validations above t is used instead.
-Validations scoring below MIN_SCORE are ignored: BirdNET reports no detections
-there, so they say nothing about the detections being counted.
+u = 1 is the usual logistic regression. Some species never get much above, say,
+95% correct even at the highest scores; forcing u = 1 then flattens the curve and
+makes it too optimistic at low scores, so a ceiling u < 1 is also fitted and kept
+when it predicts held-out checks better (5-fold cross-validation).
+
+Validated clips were sampled evenly across confidence bins. That does not bias
+P(correct | score), which is conditional on the score. Checks scoring below
+MIN_SCORE are ignored: BirdNET reports no detections there.
+
+Uncertainty comes from refitting on bootstrap resamples of the checks: a 95% band
+for the curve and a range for the threshold.
 """
 
-import itertools
 import math
 
 import numpy as np
 
 MIN_SCORE = 0.10
 GRID = np.round(np.arange(MIN_SCORE, 1.0, 0.01), 2)
-OBSERVED_BIN = 0.05
-EDGES = np.round(np.arange(0.10, 1.0 + 1e-9, OBSERVED_BIN), 2)
-SHRINKAGE = 20
-TOLERANCE = 0.02
-EPS = 1e-4
+EDGES = np.round(np.arange(MIN_SCORE, 1.0 + 1e-9, 0.05), 2)
+EPS = 1e-6
+RIDGE = 1e-2
+U_RANGE = (0.5, 1.0)
+FOLDS = 5
+BOOTSTRAP = 200
+SEED = 20261113
 
 
 def logit(p):
-    p = np.clip(np.asarray(p, dtype=float), EPS, 1 - EPS)
+    p = np.clip(np.asarray(p, dtype=float), 1e-4, 1 - 1e-4)
     return np.log(p / (1 - p))
 
 
 def sigmoid(z):
-    return 1 / (1 + np.exp(-z))
+    return 1 / (1 + np.exp(-np.clip(z, -35, 35)))
 
 
-def fit_logistic(score, correct, ridge: float = 1e-2, iterations: int = 50):
-    """(intercept, slope) of correct ~ logit(score), or None if unusable.
+def predict(params, score):
+    a, b, u = params
+    return u * sigmoid(a + b * logit(score))
 
-    Newton-Raphson with a small ridge penalty so that perfectly separated data
-    (e.g. every validation correct) still gives finite coefficients.
-    """
-    x = logit(score)
-    y = np.asarray(correct, dtype=float)
-    if len(y) == 0:
-        return None
+
+def _fit_fixed_u(x, y, u, start=None, iterations=60):
+    """(a, b, log-likelihood) for a fixed ceiling u, by Fisher scoring."""
     design = np.column_stack([np.ones_like(x), x])
-    beta = np.zeros(2)
-    penalty = ridge * np.eye(2)
+    beta = np.zeros(2) if start is None else np.array(start, dtype=float)
+    penalty = RIDGE * np.eye(2)
     for _ in range(iterations):
-        p = sigmoid(design @ beta)
-        w = p * (1 - p)
-        gradient = design.T @ (y - p) - penalty @ beta
-        hessian = (design * w[:, None]).T @ design + penalty
+        s = sigmoid(design @ beta)
+        p = np.clip(u * s, EPS, 1 - EPS)
+        score_z = (1 - s) * (y - p) / (1 - p)
+        info_w = p * (1 - s) ** 2 / (1 - p)
+        gradient = design.T @ score_z - penalty @ beta
+        info = (design * info_w[:, None]).T @ design + penalty
         try:
-            step = np.linalg.solve(hessian, gradient)
+            step = np.linalg.solve(info, gradient)
         except np.linalg.LinAlgError:
             return None
         beta = beta + step
         if np.max(np.abs(step)) < 1e-8:
             break
+    p = np.clip(u * sigmoid(design @ beta), EPS, 1 - EPS)
+    loglik = float(np.sum(y * np.log(p) + (1 - y) * np.log(1 - p)))
+    if not np.all(np.isfinite(beta)) or not math.isfinite(loglik):
+        return None
+    return float(beta[0]), float(beta[1]), loglik
+
+
+def fit(score, correct, ceiling: bool):
+    """(a, b, u) maximising the likelihood, or None if correctness does not rise
+    with the score."""
+    x = logit(score)
+    y = np.asarray(correct, dtype=float)
+    if len(y) == 0:
+        return None
+    if not ceiling:
+        result = _fit_fixed_u(x, y, 1.0)
+        best = None if result is None else (result[0], result[1], 1.0)
     else:
+        # Golden-section search on the profile likelihood of u.
+        lo, hi = U_RANGE
+        ratio = (math.sqrt(5) - 1) / 2
+        cache = {}
+
+        def profile(u):
+            if u not in cache:
+                cache[u] = _fit_fixed_u(x, y, u)
+            r = cache[u]
+            return -math.inf if r is None else r[2]
+
+        c, d = hi - ratio * (hi - lo), lo + ratio * (hi - lo)
+        for _ in range(30):
+            if profile(c) > profile(d):
+                hi = d
+            else:
+                lo = c
+            c, d = hi - ratio * (hi - lo), lo + ratio * (hi - lo)
+        u = max(cache, key=lambda k: profile(k))
+        if profile(1.0) >= profile(u):
+            u = 1.0
+        r = cache[u]
+        best = None if r is None else (r[0], r[1], u)
+    if best is None or best[1] <= 0:
         return None
-    intercept, slope = float(beta[0]), float(beta[1])
-    if not (math.isfinite(intercept) and math.isfinite(slope)) or slope <= 0:
-        return None
-    return intercept, slope
+    return best
 
 
-def bin_index(score):
-    """Index of the 0.05-wide score bin (scores of 1.0 join the last bin)."""
-    idx = np.floor((np.asarray(score, dtype=float) - EDGES[0]) / OBSERVED_BIN + 1e-9)
-    return np.clip(idx.astype(int), 0, len(EDGES) - 2)
+def _log_loss(params, score, correct):
+    p = np.clip(predict(params, score), EPS, 1 - EPS)
+    y = np.asarray(correct, dtype=float)
+    return float(-np.mean(y * np.log(p) + (1 - y) * np.log(1 - p)))
 
 
-def bin_adjustment(score, correct, intercept, slope, shrinkage=SHRINKAGE):
-    """Per-bin shift of the logistic curve towards the observed accuracy."""
-    score = np.asarray(score, dtype=float)
-    correct = np.asarray(correct, dtype=float)
-    p = sigmoid(intercept + slope * logit(score))
-    idx = bin_index(score)
-    delta = np.zeros(len(EDGES) - 1)
-    for b in range(len(delta)):
-        keep = idx == b
-        n = keep.sum()
-        if n:
-            delta[b] = n / (n + shrinkage) * (correct[keep].mean() - p[keep].mean())
-    return delta
+def cross_validated_loss(score, correct, ceiling: bool, rng) -> float:
+    folds = rng.permutation(len(score)) % FOLDS
+    losses = []
+    for k in range(FOLDS):
+        train, test = folds != k, folds == k
+        params = fit(score[train], correct[train], ceiling)
+        if params is None:
+            return math.inf
+        losses.append(_log_loss(params, score[test], correct[test]) * test.sum())
+    return sum(losses) / len(score)
 
 
-def adjusted_probability(score, intercept, slope, delta):
-    """Logistic curve plus the bin shifts, interpolated between bin centres."""
-    centres = (EDGES[:-1] + EDGES[1:]) / 2
-    shift = np.interp(np.asarray(score, dtype=float), centres, delta)
-    return np.clip(sigmoid(intercept + slope * logit(score)) + shift, 0.0, 1.0)
+def threshold_for(curve, n_above, level, min_above):
+    """Lowest grid score where the curve reaches `level` with enough checks above."""
+    ok = (curve >= level) & (n_above >= min_above)
+    return float(GRID[np.argmax(ok)]) if ok.any() else None
 
 
-def expected_precision(p_correct, bin_centres, bin_counts, grid=GRID):
-    """Expected share of correct detections among all detections scoring >= t."""
-    bin_centres = np.asarray(bin_centres, dtype=float)
-    counts = np.asarray(bin_counts, dtype=float)
-    out = np.full(len(grid), np.nan)
-    for i, t in enumerate(grid):
-        keep = bin_centres >= t
-        n = counts[keep].sum()
-        if n > 0:
-            out[i] = float((counts[keep] * p_correct[keep]).sum() / n)
-    return out
-
-
-def naive_precision(score, correct, grid=GRID):
-    """Share of correct validations among validations scoring >= t."""
-    score = np.asarray(score, dtype=float)
-    correct = np.asarray(correct, dtype=float)
-    out = np.full(len(grid), np.nan)
-    for i, t in enumerate(grid):
-        keep = score >= t
-        if keep.any():
-            out[i] = float(correct[keep].mean())
-    return out
-
-
-def choose_threshold(
-    precision, n_validated_above, target, fallback, min_above, grid=GRID
-):
-    """(threshold, precision, status) from a precision curve over the grid."""
-    ok = ~np.isnan(precision) & (np.asarray(n_validated_above) >= min_above)
-    strict = np.flatnonzero(ok & (precision >= target))
-    if len(strict):
-        i = strict[0]
-        return float(grid[i]), float(precision[i]), "calibrated"
-    loose = np.flatnonzero(ok & (precision >= fallback))
-    if len(loose):
-        # The lowest threshold within TOLERANCE of the best precision: raising the
-        # threshold further would discard detections for almost no gain.
-        best = precision[loose].max()
-        i = loose[np.argmax(precision[loose] >= best - TOLERANCE)]
-        return float(grid[i]), float(precision[i]), "calibrated_low"
-    return None, None, "unreliable"
+def wilson(k, n, z=1.96):
+    """95% Wilson interval for k successes out of n."""
+    if n == 0:
+        return None, None
+    p = k / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return max(0.0, centre - half), min(1.0, centre + half)
 
 
 def calibrate_species(
@@ -159,76 +156,94 @@ def calibrate_species(
     target: float,
     fallback: float,
     min_above: int,
+    bootstrap: int = BOOTSTRAP,
 ):
-    """Threshold, status, method and the curves needed to draw the calibration."""
+    """Threshold, status, model and everything needed to draw the calibration."""
+    rng = np.random.default_rng(SEED)
     score = np.asarray(score, dtype=float)
     correct = np.asarray(correct, dtype=bool)
     relevant = score >= MIN_SCORE
     score, correct = score[relevant], correct[relevant]
     hist_scores = np.asarray(hist_scores, dtype=float)
     hist_counts = np.asarray(hist_counts, dtype=float)
-    if hist_counts.sum() == 0:
-        # No detections to weight by: fall back to the validations' own scores.
-        hist_scores, hist_counts = score, np.ones_like(score)
 
     n_above = np.array([(score >= t).sum() for t in GRID])
-    naive = naive_precision(score, correct)
-    fit = fit_logistic(score, correct)
-    if fit is not None:
-        intercept, slope = fit
-        delta = bin_adjustment(score, correct, intercept, slope)
-        precision = expected_precision(
-            adjusted_probability(hist_scores, intercept, slope, delta),
-            hist_scores,
-            hist_counts,
-        )
-        p_logistic = sigmoid(intercept + slope * logit(GRID))
-        p_fit = adjusted_probability(GRID, intercept, slope, delta)
-        method = "logistic"
-    else:
-        intercept = slope = None
-        precision = naive
-        p_logistic = p_fit = np.full(len(GRID), np.nan)
-        method = "empirical"
-
-    threshold, at_threshold, status = choose_threshold(
-        precision, n_above, target, fallback, min_above
-    )
     detections_above = np.array([hist_counts[hist_scores >= t].sum() for t in GRID])
 
+    loss_plain = cross_validated_loss(score, correct, False, rng)
+    loss_ceiling = cross_validated_loss(score, correct, True, rng)
+    ceiling = loss_ceiling < loss_plain
+    params = fit(score, correct, ceiling)
+
+    curve = lower = upper = np.full(len(GRID), np.nan)
+    threshold = threshold_lo = threshold_hi = at_threshold = None
+    status, model = "unreliable", "no_fit"
+    if params is not None:
+        model = "logistic_ceiling" if params[2] < 0.995 else "logistic"
+        curve = predict(params, GRID)
+        reaches_target = threshold_for(curve, n_above, target, min_above) is not None
+        level = target if reaches_target else fallback
+        threshold = threshold_for(curve, n_above, level, min_above)
+        if threshold is not None:
+            status = "calibrated" if level == target else "calibrated_low"
+            at_threshold = float(predict(params, threshold))
+
+        boot_curves, boot_thresholds = [], []
+        for _ in range(bootstrap):
+            idx = rng.integers(0, len(score), len(score))
+            p = fit(score[idx], correct[idx], ceiling)
+            if p is None:
+                continue
+            c = predict(p, GRID)
+            boot_curves.append(c)
+            t = threshold_for(c, n_above, level, min_above)
+            boot_thresholds.append(np.inf if t is None else t)
+        if boot_curves:
+            lower, upper = np.percentile(np.array(boot_curves), [2.5, 97.5], axis=0)
+        if threshold is not None and boot_thresholds:
+            lo, hi = np.percentile(np.array(boot_thresholds), [2.5, 97.5], method="nearest")
+            threshold_lo = round(float(lo), 2) if np.isfinite(lo) else None
+            threshold_hi = round(float(hi), 2) if np.isfinite(hi) else None
+
     observed = []
-    idx = bin_index(score)
-    for b, (lo, hi) in enumerate(itertools.pairwise(EDGES)):
+    idx = np.clip(
+        np.floor((score - EDGES[0]) / 0.05 + 1e-9).astype(int), 0, len(EDGES) - 2
+    )
+    for b in range(len(EDGES) - 1):
         keep = idx == b
-        if keep.any():
+        n, k = int(keep.sum()), int(correct[keep].sum())
+        if n:
+            lo, hi = wilson(k, n)
             observed.append(
                 {
-                    "confidence": round(float((lo + hi) / 2), 3),
-                    "n_validated": int(keep.sum()),
-                    "n_correct": int(correct[keep].sum()),
+                    "confidence": round(float(EDGES[b] + 0.025), 3),
+                    "n_validated": n,
+                    "n_correct": k,
+                    "p_lower": lo,
+                    "p_upper": hi,
                 }
             )
 
-    curve = [
-        {
-            "confidence": float(t),
-            "p_correct": _num(p_fit[i]),
-            "p_logistic": _num(p_logistic[i]),
-            "precision_above": _num(precision[i]),
-            "naive_precision_above": _num(naive[i]),
-            "n_validated_above": int(n_above[i]),
-            "n_detections_above": int(detections_above[i]),
-        }
-        for i, t in enumerate(GRID)
-    ]
     return {
         "threshold": threshold,
-        "precision_at_threshold": at_threshold,
+        "threshold_lower": threshold_lo,
+        "threshold_upper": threshold_hi,
+        "p_at_threshold": at_threshold,
         "status": status,
-        "method": method,
-        "intercept": intercept,
-        "slope": slope,
-        "curve": curve,
+        "model": model,
+        "params": params,
+        "cv_loss": {"logistic": loss_plain, "logistic_ceiling": loss_ceiling},
+        "curve": [
+            {
+                "confidence": float(t),
+                "p_correct": _num(curve[i]),
+                "p_lower": _num(lower[i]),
+                "p_upper": _num(upper[i]),
+                "n_validated_above": int(n_above[i]),
+                "n_detections_above": int(detections_above[i]),
+            }
+            for i, t in enumerate(GRID)
+        ],
         "observed": observed,
     }
 

@@ -336,12 +336,8 @@ def build_thresholds(con, out: str):
                 {
                     "species": species,
                     "n_validated": len(rows),
-                    "threshold": None,
-                    "precision_at_threshold": None,
                     "status": "unreliable",
                     "method": "insufficient",
-                    "intercept": None,
-                    "slope": None,
                 }
             )
             continue
@@ -355,16 +351,20 @@ def build_thresholds(con, out: str):
             fallback=FALLBACK_PRECISION,
             min_above=MIN_ABOVE_THRESHOLD,
         )
+        a, b, u = result["params"] or (None, None, None)
         thresholds.append(
             {
                 "species": species,
                 "n_validated": len(rows),
                 "threshold": result["threshold"],
-                "precision_at_threshold": result["precision_at_threshold"],
+                "threshold_lower": result["threshold_lower"],
+                "threshold_upper": result["threshold_upper"],
+                "precision_at_threshold": result["p_at_threshold"],
                 "status": result["status"],
-                "method": result["method"],
-                "intercept": result["intercept"],
-                "slope": result["slope"],
+                "method": result["model"],
+                "intercept": a,
+                "slope": b,
+                "ceiling": u,
             }
         )
         curves += [{"species": species, **row} for row in result["curve"]]
@@ -373,16 +373,17 @@ def build_thresholds(con, out: str):
     columns = {
         "thresholds": (
             "species VARCHAR, n_validated BIGINT, threshold DOUBLE, "
+            "threshold_lower DOUBLE, threshold_upper DOUBLE, "
             "precision_at_threshold DOUBLE, status VARCHAR, method VARCHAR, "
-            "intercept DOUBLE, slope DOUBLE"
+            "intercept DOUBLE, slope DOUBLE, ceiling DOUBLE"
         ),
         "calibration_curve": (
-            "species VARCHAR, confidence DOUBLE, p_correct DOUBLE, p_logistic DOUBLE, "
-            "precision_above DOUBLE, naive_precision_above DOUBLE, "
-            "n_validated_above BIGINT, n_detections_above BIGINT"
+            "species VARCHAR, confidence DOUBLE, p_correct DOUBLE, p_lower DOUBLE, "
+            "p_upper DOUBLE, n_validated_above BIGINT, n_detections_above BIGINT"
         ),
         "calibration_observed": (
-            "species VARCHAR, confidence DOUBLE, n_validated BIGINT, n_correct BIGINT"
+            "species VARCHAR, confidence DOUBLE, n_validated BIGINT, n_correct BIGINT, "
+            "p_lower DOUBLE, p_upper DOUBLE"
         ),
     }
     for table, rows in (
@@ -392,9 +393,9 @@ def build_thresholds(con, out: str):
     ):
         con.execute(f"CREATE OR REPLACE TABLE {table} ({columns[table]})")
         if rows:
-            con.register("frame", pd.DataFrame(rows))
-            names = ", ".join(c.split()[0] for c in columns[table].split(", "))
-            con.execute(f"INSERT INTO {table} SELECT {names} FROM frame")
+            names = [c.split()[0] for c in columns[table].split(", ")]
+            con.register("frame", pd.DataFrame(rows).reindex(columns=names))
+            con.execute(f"INSERT INTO {table} SELECT {', '.join(names)} FROM frame")
             con.unregister("frame")
     con.execute(
         f"""
@@ -491,7 +492,8 @@ def build_species(con, names_csv: str | None, out: str):
                    COALESCE(th.status, 'default') AS threshold_source,
                    COALESCE(ck.n_validated, 0) AS n_validated,
                    COALESCE(ck.n_correct, 0) AS n_correct,
-                   th.precision_at_threshold
+                   th.precision_at_threshold, th.threshold_lower, th.threshold_upper,
+                   th.method AS threshold_method
             FROM totals tot
             LEFT JOIN {names} n ON n.Scientific_Name = tot.species
             LEFT JOIN thresholds th USING (species)
