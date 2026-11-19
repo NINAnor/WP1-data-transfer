@@ -65,10 +65,12 @@ Provide these in the local `.env` file or Docker environment:
 PARQUET_FILE_URL=/app/index.parquet
 USERNAME=your_username
 PASSWORD=your_password
-SITE_CSV_URL=https://your-domain.com/data/site_info.csv
+SITE_CSV_URL=/app/site_info.csv
 ```
 
-`PARQUET_FILE_URL` points to the local `index.parquet` produced by step 02. The legacy preprocessing downloader also accepts an HTTP(S) URL. `SITE_CSV_URL` is used by the device-status and recording-matrix CSVs.
+`PARQUET_FILE_URL` points to the local `index.parquet` produced by step 02. The legacy preprocessing downloader also accepts an HTTP(S) URL. The cron pipeline copies `site_info.csv` from the bucket for steps 03–04 and ignores `SITE_CSV_URL` (the old public `https://tabmon.nina.no/data/` route no longer exists); `SITE_CSV_URL` only matters when running step 03 by hand.
+
+If steps 03–04 (team-area CSVs) fail, the pipeline still runs step 05 (dashboard tables) and reports the failure at the end.
 
 The entrypoint reads `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and `S3_ENDPOINT` from the `[nirds3]` section of the rclone config at `$RCLONE_CONFIG` unless those variables are already supplied. The resulting cron environment file is private to the container; credential values are not written to logs. `DUCKDB_TEMP_DIR` is set to `/app/output/duckdb-tmp`.
 

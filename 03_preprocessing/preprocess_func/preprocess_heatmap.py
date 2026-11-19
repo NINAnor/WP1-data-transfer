@@ -1,6 +1,7 @@
 import pandas as pd
 import duckdb
 
+from .device_status_preprocessing import device_key
 from .download import resolve_source, cleanup
 
 def load_site_info(csv_file, delimiter=",", username=None, password=None):
@@ -48,8 +49,9 @@ def preprocess_heatmap(parquet_file, site_csv_path, username, password):
     # "Active" may contain NA/NaN (e.g. blank cells in the source CSV); treat
     # those as inactive rather than raising a boolean-mask error.
     site_info = site_info[site_info["Active"].fillna(False).astype(bool)].copy()
-    site_info["clean_id"] = site_info["DeviceID"].str.strip().str[-8:]
-    data["clean_id"] = data["short_device_id"].str.strip()
+    # Canonical IDs, so that IDs written without their leading zero still match.
+    site_info["clean_id"] = device_key(site_info["DeviceID"])
+    data["clean_id"] = device_key(data["short_device_id"])
 
     # Merge data — Country comes directly from site_info
     df_merged = pd.merge(data, site_info, on="clean_id", how="left")

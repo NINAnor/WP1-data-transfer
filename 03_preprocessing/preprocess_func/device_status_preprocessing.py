@@ -5,6 +5,16 @@ from datetime import datetime, timedelta, timezone
 
 from .download import resolve_source, cleanup
 
+
+def device_key(ids: pd.Series) -> pd.Series:
+    """Canonical recorder ID: lower case, last 8 characters, leading zeros removed.
+
+    Bugg folders end in the 8-hex-digit ID (bugg_RPiID-1000000002550e55), but the
+    site-info form often has the ID without its leading zero (2550e55).
+    """
+    return ids.astype("string").str.strip().str.lower().str[-8:].str.lstrip("0")
+
+
 def preprocess_device_status(parquet_file, 
                              username=None, 
                              password=None, 
@@ -74,10 +84,14 @@ def merge_status_site_info(df_status, site_csv_path, username=None, password=Non
     # those as inactive rather than raising a boolean-mask error.
     site_info = site_info[site_info["Active"].fillna(False).astype(bool)].copy()
 
-    # Create mapping between device IDs - use consistent 8-character suffix
-    site_info["short_device"] = site_info["DeviceID"].str.strip().str[-8:]
-    df_status["short_device"] = df_status["short_device"].str.strip()
-    merged = pd.merge(site_info, df_status, on="short_device", how="left")
+    # Match site-info device IDs to Bugg folders on the canonical ID, so that IDs
+    # written without their leading zero (7 characters) still match.
+    site_info["device_key"] = device_key(site_info["DeviceID"])
+    df_status["device_key"] = device_key(df_status["short_device"])
+    merged = pd.merge(site_info, df_status, on="device_key", how="left")
+    merged["short_device"] = merged["short_device"].fillna(
+        merged["DeviceID"].str.strip()
+    )
 
     # Fill missing values for sites with no recordings
     merged["device_name"] = merged["device"].fillna("RPiID-" + merged["DeviceID"])

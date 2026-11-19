@@ -14,6 +14,7 @@ files that the API rolls up on request:
   validation_summary.parquet  clips listened to per country / source
   calibration.parquet  per-species threshold calibration curves (for charts)
   species_names.parquet  common names per species and language
+  site_activity.parquet  recordings uploaded per site and day (team area)
 
 Usage:
   python build_tables.py --source s3://bencretois-ns8129k-proj-tabmon --out ./out
@@ -93,6 +94,15 @@ def local_ts(utc_expr: str, country_col: str) -> str:
     return f"timezone({tz_case(country_col)}, ({utc_expr})::TIMESTAMPTZ)"
 
 
+def device_key(expr: str) -> str:
+    """Canonical recorder ID: lower case, last 8 characters, leading zeros removed.
+
+    Bugg folders end in the 8-hex-digit ID (bugg_RPiID-1000000002550e55), but the
+    site-info form often has the ID without its leading zero (2550e55).
+    """
+    return f"ltrim(right(lower(trim({expr})), 8), '0')"
+
+
 def file_ts(name_col: str) -> str:
     """UTC timestamp parsed from a Bugg file name like 2025-06-06T13_04_30.037Z.mp3."""
     return (
@@ -111,7 +121,7 @@ def build_deployments(con, src: str, out: str):
         )
         SELECT
             trim(DeploymentID) AS deployment_id,
-            lower(trim(DeviceID)) AS device_id,
+            {device_key("DeviceID")} AS device_id,
             trim(Country) AS country,
             trim(Cluster) AS cluster,
             trim(Site) AS site,
@@ -158,14 +168,14 @@ def build_index(con, src: str):
           AND country LIKE 'proj_tabmon_NINA%'
         """
     )
-    # Map each Bugg directory to the short device ids used in site_info.
+    # Map each Bugg directory to the canonical device ids used in site_info.
     con.execute(
-        """
+        f"""
         CREATE OR REPLACE TABLE bugg_map AS
         SELECT DISTINCT f.bugg, d.device_id
         FROM (SELECT DISTINCT bugg FROM files) f
         JOIN (SELECT DISTINCT device_id FROM deployments) d
-          ON ends_with(lower(f.bugg), d.device_id)
+          ON {device_key("f.bugg")} = d.device_id
         """
     )
     con.execute(
@@ -181,6 +191,28 @@ def build_index(con, src: str):
          AND f.ts_utc <= COALESCE(d.end_ts, TIMESTAMP '2100-01-01')
         WHERE f.ts_utc >= TIMESTAMP '{DATA_START}'
         QUALIFY row_number() OVER (PARTITION BY f.path ORDER BY d.begin_ts DESC) = 1
+        """
+    )
+
+
+def build_site_activity(con, out: str):
+    """Recordings uploaded per site and day, for the team area's activity heatmap.
+
+    Files are attributed to sites by device and deployment dates (see
+    build_index), so a site keeps its history when its recorder is replaced, and
+    a relocated recorder's files go to the site it was at on that day.
+    """
+    log.info("site activity")
+    con.execute(
+        f"""
+        COPY (
+            SELECT site_id, ts_local::DATE AS date, count(*)::INTEGER AS n_files,
+                   list(DISTINCT lpad(device_id, 8, '0') ORDER BY lpad(device_id, 8, '0'))
+                       AS devices
+            FROM recordings
+            GROUP BY ALL
+            ORDER BY site_id, date
+        ) TO '{out}/site_activity.parquet' (FORMAT parquet)
         """
     )
 
@@ -589,7 +621,7 @@ def build_photos(con, src: str, out: str):
             FROM (
                 SELECT substr(file, length('{src}/data/') + 1) AS path,
                        {name} AS name,
-                       lower(regexp_extract(lower({name}), '_([0-9a-f]{{7,8}})[_.( ]', 1))
+                       {device_key(f"regexp_extract(lower({name}), '_([0-9a-f]{{7,8}})[_.( ]', 1)")}
                            AS device_id
                 FROM glob('{src}/data/pictures/**')
                 WHERE regexp_matches(lower(file), '\\.(jpe?g|png)$')
@@ -628,6 +660,7 @@ def main():
     con = connect(src.startswith("s3://") or out.startswith("s3://"))
     build_deployments(con, src, out)
     build_index(con, src)
+    build_site_activity(con, out)
     build_coverage(con, src)
     build_effort(con, out)
     build_photos(con, src, out)
